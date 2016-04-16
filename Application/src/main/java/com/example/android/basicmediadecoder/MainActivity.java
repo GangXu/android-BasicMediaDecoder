@@ -29,6 +29,7 @@ import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextPaint;
+import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -46,14 +47,43 @@ import com.example.android.common.media.MyH264Extractor;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * This activity uses a {@link android.view.TextureView} to render the frames of a video decoded using
  * {@link android.media.MediaCodec} API.
  */
 public class MainActivity extends Activity {
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if(outputStream == null){
+            return super.dispatchKeyEvent(event);
+        }
+        byte[] input = new byte[5];
+
+        if(event.getAction() == KeyEvent.ACTION_DOWN){
+            input[0] = 3;
+        }else if(event.getAction() == KeyEvent.ACTION_UP){
+            input[0] = 4;
+        }
+
+        ByteBuffer keyCode = ByteBuffer.wrap(input, 1, 4);
+        keyCode.order(ByteOrder.LITTLE_ENDIAN).putInt(event.getKeyCode());
+
+        System.out.print("send input:" + event.getKeyCode());
+
+        try {
+            outputStream.write(input);
+        } catch (IOException e) {
+            System.out.print(" fail\n");
+        }
+
+        return true;
+    }
 
     private TextureView mPlaybackView;
     private TimeAnimator mTimeAnimator = new TimeAnimator();
@@ -114,6 +144,7 @@ public class MainActivity extends Activity {
         return true;
     }
 
+    private OutputStream outputStream = null;
 
     public void startPlayback() {
         mDecoder.start();
@@ -127,7 +158,7 @@ public class MainActivity extends Activity {
             public void run() {
 
                 /* 服务器地址 */
-                final String SERVER_HOST_IP = "192.168.1.18";
+                final String SERVER_HOST_IP = "192.168.1.13";
                 /* 服务器端口 */
                 final int SERVER_HOST_PORT = 8888;
 
@@ -138,6 +169,7 @@ public class MainActivity extends Activity {
                 try {
                     socket = new Socket(SERVER_HOST_IP, SERVER_HOST_PORT);
                     stream = socket.getInputStream();
+                    outputStream = socket.getOutputStream();
                 }catch (IOException e){
                     ///Toast.makeText(getApplicationContext(), "连接源失败", Toast.LENGTH_SHORT).show();
                     return;
