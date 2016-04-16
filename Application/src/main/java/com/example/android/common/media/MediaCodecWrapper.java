@@ -239,7 +239,8 @@ public class MediaCodecWrapper {
      *
      * @throws MediaCodec.CryptoException
      */
-    public boolean writeSample(final MediaExtractor extractor,
+    //public boolean writeSample(final MediaExtractor extractor,
+    public boolean writeSample(final IMediaExtractor extractor,
             final boolean isSecure,
             final long presentationTimeUs,
             int flags) {
@@ -261,7 +262,7 @@ public class MediaCodecWrapper {
             if (!isSecure) {
                 mDecoder.queueInputBuffer(index, 0, size, presentationTimeUs, flags);
             } else {
-                extractor.getSampleCryptoInfo(cryptoInfo);
+                ///extractor.getSampleCryptoInfo(cryptoInfo);
                 mDecoder.queueSecureInputBuffer(index, 0, cryptoInfo, presentationTimeUs, flags);
             }
 

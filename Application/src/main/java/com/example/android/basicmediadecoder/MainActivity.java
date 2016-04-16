@@ -19,21 +19,35 @@ package com.example.android.basicmediadecoder;
 
 import android.animation.TimeAnimator;
 import android.app.Activity;
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.TextPaint;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import com.example.android.common.media.IMediaExtractor;
 import com.example.android.common.media.MediaCodecWrapper;
+import com.example.android.common.media.MyH264Extractor;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.Socket;
+import java.nio.ByteBuffer;
 
 /**
  * This activity uses a {@link android.view.TextureView} to render the frames of a video decoded using
@@ -47,9 +61,15 @@ public class MainActivity extends Activity {
     // A utility that wraps up the underlying input and output buffer processing operations
     // into an east to use API.
     private MediaCodecWrapper mCodecWrapper;
-    private MediaExtractor mExtractor = new MediaExtractor();
+    private MediaExtractor mExtractor2 = new MediaExtractor();
+    private IMediaExtractor mExtractor = new MyH264Extractor();
     TextView mAttribView = null;
 
+    // video output dimension
+    static final int OUTPUT_WIDTH = 1280;
+    static final int OUTPUT_HEIGHT = 720;
+
+    VideoDecoder mDecoder;
 
     /**
      * Called when the activity is first created.
@@ -61,6 +81,7 @@ public class MainActivity extends Activity {
         mPlaybackView = (TextureView) findViewById(R.id.PlaybackView);
         mAttribView =  (TextView)findViewById(R.id.AttribView);
 
+        mDecoder = new VideoDecoder();
     }
 
     @Override
@@ -95,42 +116,113 @@ public class MainActivity extends Activity {
 
 
     public void startPlayback() {
+        mDecoder.start();
+
+        mDecoder.configure(new Surface(mPlaybackView.getSurfaceTexture()), 1280, 720, new byte[]{}, 0, 0);
+
+        final Context ctx = this;
+
+        Thread mFeedWorker = new Thread(new Runnable(){
+            @Override
+            public void run() {
+
+                /* 服务器地址 */
+                final String SERVER_HOST_IP = "192.168.1.18";
+                /* 服务器端口 */
+                final int SERVER_HOST_PORT = 8888;
+
+                Socket socket;
+                InputStream stream = null;
+
+                /* 连接服务器 */
+                try {
+                    socket = new Socket(SERVER_HOST_IP, SERVER_HOST_PORT);
+                    stream = socket.getInputStream();
+                }catch (IOException e){
+                    ///Toast.makeText(getApplicationContext(), "连接源失败", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                /*try {
+                    stream = ctx.getContentResolver().openInputStream(Uri.parse("android.resource://"
+                            + getPackageName() + "/"
+                            //+ R.raw.vid_bigbuckbunny);
+                            + R.raw.test));
+                }catch (FileNotFoundException e){
+
+                }*/
+
+                byte[] frameSample = new byte[1280 * 720];
+                while(true){
+                    try {
+                        byte[] head = new byte[]{0, 0, 0, 0};
+                        if(4 != stream.read(head)){
+                            break;
+                        }
+                        int length = (0xFF & head[3]) << 24 | (0xFF & head[2]) << 16 | (0xFF & head[1]) << 8 | (0xFF & head[0]);
+                        System.out.println("length: " + length);
+
+                        int more = length;
+                        while(more > 0) {
+                            int ret = stream.read(frameSample, length - more, more);
+                            if(ret > 0){
+                                more -= ret;
+                            }else if(ret < 0){
+                                break;
+                            }
+                        }
+
+                        if(more != 0){
+                            System.out.println("receive length: " + (length - more));
+                            return;
+                        }
+
+                        mDecoder.decodeSample(frameSample, 0, length, System.currentTimeMillis(), 0);
+
+                        ///Thread.sleep(20);
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        });
+        mFeedWorker.start();
 
         // Construct a URI that points to the video resource that we want to play
-        Uri videoUri = Uri.parse("android.resource://"
+        /*Uri videoUri = Uri.parse("android.resource://"
                 + getPackageName() + "/"
-                + R.raw.vid_bigbuckbunny);
+                //+ R.raw.vid_bigbuckbunny);
+                + R.raw.test);
 
         try {
 
             // BEGIN_INCLUDE(initialize_extractor)
             mExtractor.setDataSource(this, videoUri, null);
-            int nTracks = mExtractor.getTrackCount();
+            ///int nTracks = mExtractor.getTrackCount();
 
             // Begin by unselecting all of the tracks in the extractor, so we won't see
             // any tracks that we haven't explicitly selected.
-            for (int i = 0; i < nTracks; ++i) {
-                mExtractor.unselectTrack(i);
-            }
 
+            MediaFormat format = MediaFormat.createVideoFormat("video/AVC", 1280, 720);
 
             // Find the first video track in the stream. In a real-world application
             // it's possible that the stream would contain multiple tracks, but this
             // sample assumes that we just want to play the first one.
-            for (int i = 0; i < nTracks; ++i) {
-                // Try to create a video codec for this track. This call will return null if the
-                // track is not a video track, or not a recognized video format. Once it returns
-                // a valid MediaCodecWrapper, we can break out of the loop.
-                mCodecWrapper = MediaCodecWrapper.fromVideoFormat(mExtractor.getTrackFormat(i),
-                        new Surface(mPlaybackView.getSurfaceTexture()));
-                if (mCodecWrapper != null) {
-                    mExtractor.selectTrack(i);
-                    break;
-                }
+            //for (int i = 0; i < nTracks; ++i) {
+            // Try to create a video codec for this track. This call will return null if the
+            // track is not a video track, or not a recognized video format. Once it returns
+            // a valid MediaCodecWrapper, we can break out of the loop.
+            mCodecWrapper = MediaCodecWrapper.fromVideoFormat(format, //mExtractor.getTrackFormat(i),
+                    new Surface(mPlaybackView.getSurfaceTexture()));
+            if (mCodecWrapper != null) {
+                //mExtractor.selectTrack(i);
+                //break;
+            } else {
+                return;
             }
+            //}
             // END_INCLUDE(initialize_extractor)
-
-
 
 
             // By using a {@link TimeAnimator}, we can sync our media rendering commands with
@@ -142,22 +234,21 @@ public class MainActivity extends Activity {
                                          final long totalTime,
                                          final long deltaTime) {
 
-                    boolean isEos = ((mExtractor.getSampleFlags() & MediaCodec
-                            .BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    // Try to submit the sample to the codec and if successful advance the
+                    // extractor to the next available sample to read.
 
-                    // BEGIN_INCLUDE(write_sample)
-                    if (!isEos) {
-                        // Try to submit the sample to the codec and if successful advance the
-                        // extractor to the next available sample to read.
-                        boolean result = mCodecWrapper.writeSample(mExtractor, false,
-                                mExtractor.getSampleTime(), mExtractor.getSampleFlags());
+                    boolean result = mCodecWrapper.writeSample(mExtractor, false,
+                            System.currentTimeMillis(), 0);
 
-                        if (result) {
-                            // Advancing the extractor is a blocking operation and it MUST be
-                            // executed outside the main thread in real applications.
-                            mExtractor.advance();
-                        }
+                    if (result) {
+                        System.out.println("PTS: " + System.currentTimeMillis());
+                        // Advancing the extractor is a blocking operation and it MUST be
+                        // executed outside the main thread in real applications.
+                        mExtractor.advance();
+                    } else {
+                        ///System.out.println("result " + result);
                     }
+                    //}
                     // END_INCLUDE(write_sample)
 
                     // Examine the sample at the head of the queue to see if its ready to be
@@ -166,13 +257,15 @@ public class MainActivity extends Activity {
                     mCodecWrapper.peekSample(out_bufferInfo);
 
                     // BEGIN_INCLUDE(render_sample)
-                    if (out_bufferInfo.size <= 0 && isEos) {
+                    if (out_bufferInfo.size <= 0 && false) {
                         mTimeAnimator.end();
                         mCodecWrapper.stopAndRelease();
                         mExtractor.release();
                     } else if (out_bufferInfo.presentationTimeUs / 1000 < totalTime) {
                         // Pop the sample off the queue and send it to {@link Surface}
                         mCodecWrapper.popSample(true);
+
+
                     }
                     // END_INCLUDE(render_sample)
 
@@ -184,6 +277,6 @@ public class MainActivity extends Activity {
             mTimeAnimator.start();
         } catch (IOException e) {
             e.printStackTrace();
-        }
+        }*/
     }
 }
